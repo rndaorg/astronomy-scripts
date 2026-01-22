@@ -1,4 +1,4 @@
-# Day 3: Download Abell Catalog via astroquery and plot with healpy (FIXED)
+# Download Abell Catalog and plot with healpy
 
 import numpy as np
 import healpy as hp
@@ -16,39 +16,49 @@ dec_deg = abell['DEJ2000'].data
 
 print(f"Downloaded {len(ra_deg)} entries.")
 
-# --- 2. Convert to HEALPix coordinates ---
+# --- 2. Optional: Filter to likely real Abell clusters ---
+# Original Abell catalog has ~4,073 clusters; V/114 includes many duplicates/artifacts.
+# We can filter by richness (RICH >= 0) and distance class (DIST <= 7) if columns exist.
+if 'RICH' in abell.colnames and 'DIST' in abell.colnames:
+    mask = (abell['RICH'] >= 0) & (abell['DIST'] <= 7)
+    ra_deg = ra_deg[mask]
+    dec_deg = dec_deg[mask]
+    print(f"After filtering: {len(ra_deg)} clusters.")
+
+# --- 3. Convert to HEALPix coordinates ---
 theta = np.radians(90.0 - dec_deg)  # colatitude
 phi = np.radians(ra_deg)
 
-# --- 3. Create HEALPix map (nside=64) ---
+# --- 4. Create HEALPix map (nside=64) ---
 nside = 64
 npix = hp.nside2npix(nside)
-hpx_map = np.zeros(npix, dtype=int)
+hpx_map = np.zeros(npix, dtype=float)  # Use float to allow NaN
 
 for t, p in zip(theta, phi):
     ipix = hp.ang2pix(nside, t, p)
-    hpx_map[ipix] += 1
+    hpx_map[ipix] += 1.0
 
-# --- 4. MASK ZERO VALUES for log-scale plotting ---
-# healpy requires positive values for log norm
-hpx_masked = hp.ma(hpx_map)
-hpx_masked.mask = (hpx_map == 0)  # mask empty pixels
+# --- 5. Replace zeros with NaN for log-scale plotting ---
+hpx_plot = np.where(hpx_map > 0, hpx_map, np.nan)
 
-# --- 5. Plot ---
+# --- 6. Plot Mollweide projection ---
 plt.figure(figsize=(12, 8))
 hp.mollview(
-    hpx_masked,
+    hpx_plot,
     title="Abell Cluster Catalog (V/114) – Sky Distribution",
     unit="Clusters per pixel",
-    norm="log",          # now safe: zeros are masked
+    norm="log",
     cmap="magma",
     cbar=True,
-    hold=False
+    hold=False,
+    min=np.nanmin(hpx_plot),  # Avoid issues with all-NaN
 )
 hp.graticule()
 plt.savefig("abell_v114_healpy.png", dpi=150, bbox_inches="tight")
 plt.show()
 
-# --- 6. Summary ---
-print(f"Total clusters: {hpx_map.sum()}")
-print(f"Pixels with clusters: {(hpx_map > 0).sum()}")
+# --- 7. Summary ---
+total_clusters = np.nansum(hpx_plot)
+pixels_with_clusters = np.count_nonzero(~np.isnan(hpx_plot))
+print(f"Total clusters plotted: {int(total_clusters)}")
+print(f"Pixels with clusters: {pixels_with_clusters}")
